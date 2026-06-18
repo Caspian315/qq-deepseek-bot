@@ -1,0 +1,30 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime logs and local memory
+botpy.log
+logs/
+memory_data/
+auto_memory.md
+
+# NapCat / QQ runtime files. Keep these local; do not publish them with bot source.
+cache/
+config/
+native/
+node_modules/
+static/
+worker/
+napcat.mjs
+NapCatWinBootHook.dll
+NapCatWinBootMain.exe
+conout-*.js
+KillQQ.bat
+launcher*.bat
+loadNapCat.js
+qqnt.json
+quickLoginExample.bat
+package.json
+package-lock.json

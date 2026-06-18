@@ -1,0 +1,4 @@
+qq-botpy>=1.2.1
+httpx>=0.27.0
+python-dotenv>=1.0.1
+websockets>=12.0
