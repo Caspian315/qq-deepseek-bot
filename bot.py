@@ -31,7 +31,6 @@ DEEPSEEK_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "45"))
 BOT_NAME = os.getenv("BOT_NAME", "东海帝皇").strip()
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "8"))
 MAX_REPLY_CHARS = int(os.getenv("MAX_REPLY_CHARS", "0"))
-PERSONA_FILE = os.getenv("PERSONA_FILE", "persona_teio.md").strip()
 MEMORY_FILE = os.getenv("MEMORY_FILE", "memory_notes.md").strip()
 TRIGGER_PREFIXES = tuple(
     prefix.strip()
@@ -49,17 +48,16 @@ SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT") or """
 
 核心能力要求：
 - 把用户的问题当作真实的信息请求来处理，优先使用常识、知识、推理和上下文回答，不要把所有问题强行解释成自己的角色设定。
-- 遇到“世界杯”“山东大学泰山学堂”“郑永康”“蓝条金、天玄刀、下一句是什么”等现实、历史、校园、体育、网络梗或文学问题时，先按正常知识问答处理。
+- 遇到世界杯、校园、体育、网络梗、文学、数学、代码等问题时，先按正常高水平问答处理。
 - 如果你知道，就直接回答；如果不确定，要明确说“不确定”并给出可能方向，不要编造。
 - 对需要实时信息、最新名单、当天赛程、当前政策的问题，说明可能需要以最新资料为准。
 - 如果下方“群内记忆与话题偏好”给出了用户指定参考口径，优先按该口径回应；但不要声称它是实时核验结果。
 - 回复长度由问题决定：简单聊天可以很短，复杂问题可以展开分析；不要固定成三四句话，也不要主动截断。
 
 人格表达：
-- 你可以使用下方“二创人格设定”中的身份、记忆、语气和说话习惯。
-- 这种人设只是表达风格，不是知识边界；不要因为人设而装作不懂现实世界。
-- 不要每句都提训练、赛跑、赛场、帝皇大人，也不要把普通问题硬套成赛马娘台词。
-- 不要声称这套二创设定是真实身份、真实学籍或官方设定；它只是群聊中的虚拟人格。
+- 使用“东海帝皇”启发的原有轻量角色风格：元气、自信、好胜、热血、嘴硬心软、反应灵动。
+- 这种人设只影响语气，不是知识边界；不要因为人设而装作不懂现实世界。
+- 可以偶尔用轻快语气或一点胜负欲，但不要每句话都提训练、赛跑、赛场、帝皇大人，也不要把普通问题硬套成角色台词。
 - 不要声称自己来自官方作品或官方运营团队。
 
 群聊风格：
@@ -135,10 +133,6 @@ def load_text_file(path_value: str, label: str) -> str:
         return ""
 
 
-def load_persona_profile() -> str:
-    return load_text_file(PERSONA_FILE, "人格")
-
-
 def load_memory_notes() -> str:
     return load_text_file(MEMORY_FILE, "记忆")
 
@@ -153,7 +147,6 @@ def load_auto_memory_notes() -> str:
 
 
 def build_system_prompt() -> str:
-    persona_profile = load_persona_profile()
     memory_notes = load_memory_notes()
     auto_memory_notes = load_auto_memory_notes()
     prompt = (
@@ -161,13 +154,6 @@ def build_system_prompt() -> str:
         f"运行时信息：当前日期是 {date.today().isoformat()}；"
         f"后端模型配置名是 {DEEPSEEK_MODEL}。"
     )
-    if persona_profile:
-        prompt += (
-            "\n\n二创人格设定：\n"
-            f"{persona_profile}\n\n"
-            "再次强调：以上人格设定只影响表达风格和长期记忆；"
-            "回答事实、数学、代码和严肃问题时，必须完整发挥通用语言模型能力。"
-        )
     if memory_notes:
         prompt += (
             "\n\n群内记忆与话题偏好：\n"

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import random
 import re
 import time
 from collections import defaultdict
@@ -22,6 +23,14 @@ def env_bool(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_probability(name: str, default: str = "1") -> float:
+    try:
+        value = float(os.getenv(name, default))
+    except ValueError:
+        value = float(default)
+    return max(0.0, min(1.0, value))
+
+
 ONEBOT_HOST = os.getenv("ONEBOT_HOST", "127.0.0.1").strip()
 ONEBOT_PORT = int(os.getenv("ONEBOT_PORT", "8080"))
 ONEBOT_PATH = os.getenv("ONEBOT_PATH", "/onebot/v11/ws").strip()
@@ -30,6 +39,8 @@ ONEBOT_GROUP_REPLY_MODE = os.getenv("ONEBOT_GROUP_REPLY_MODE", "at").strip().low
 ONEBOT_QUOTE_REPLY = os.getenv("ONEBOT_QUOTE_REPLY", "true").strip().lower() == "true"
 ONEBOT_MESSAGE_CHUNK_SIZE = int(os.getenv("ONEBOT_MESSAGE_CHUNK_SIZE", "1800"))
 ONEBOT_AUTO_REPLY_MATH_ONLY = env_bool("ONEBOT_AUTO_REPLY_MATH_ONLY", "true")
+ONEBOT_AUTO_REPLY_PROBABILITY = env_probability("ONEBOT_AUTO_REPLY_PROBABILITY", "1")
+ONEBOT_AUTO_REPLY_POKE_PROBABILITY = env_probability("ONEBOT_AUTO_REPLY_POKE_PROBABILITY", "0")
 ONEBOT_AUTO_REPLY_MAX_CHARS = int(os.getenv("ONEBOT_AUTO_REPLY_MAX_CHARS", "180"))
 ONEBOT_AUTO_REPLY_COOLDOWN_SECONDS = float(os.getenv("ONEBOT_AUTO_REPLY_COOLDOWN_SECONDS", "45"))
 ONEBOT_AUTO_REPLY_PREFACE = os.getenv("ONEBOT_AUTO_REPLY_PREFACE", "这题都能卡？先别急。").strip()
@@ -204,7 +215,9 @@ def is_math_related(text: str) -> bool:
 def is_auto_short_reply(text: str, mentioned: bool) -> bool:
     if mentioned or ONEBOT_GROUP_REPLY_MODE != "all":
         return False
-    return not ONEBOT_AUTO_REPLY_MATH_ONLY or is_math_related(text)
+    if ONEBOT_AUTO_REPLY_MATH_ONLY and not is_math_related(text):
+        return False
+    return random.random() < ONEBOT_AUTO_REPLY_PROBABILITY
 
 
 def can_auto_reply(group_id: str) -> bool:
@@ -222,14 +235,14 @@ def can_auto_reply(group_id: str) -> bool:
 
 def auto_short_prompt(text: str) -> str:
     preface_rule = (
-        f"回复必须先说“{ONEBOT_AUTO_REPLY_PREFACE}”，再给正常数学提示。"
+        f"回复必须先说“{ONEBOT_AUTO_REPLY_PREFACE}”，再自然接一句。"
         if ONEBOT_AUTO_REPLY_PREFACE
-        else "直接给正常数学提示。"
+        else "不要加固定开场白。"
     )
     return (
-        "【未被@的数学短插话】群里正在讨论数学。"
-        "请只用1到2句话给关键提示、纠正或思路提醒；"
-        "不要完整长篇解题，不要展开证明，语气自然一点。"
+        "【未被@的随机短插话】群里正在聊天。"
+        f"请只用一句话自然参与，不超过{ONEBOT_AUTO_REPLY_MAX_CHARS}个字；"
+        "不要长篇解释，不要连续追问，语气像普通群友。"
         f"{preface_rule}\n\n"
         f"{text}"
     )
@@ -261,7 +274,11 @@ def shorten_auto_reply(reply: str) -> str:
         cut = ONEBOT_AUTO_REPLY_MAX_CHARS
     else:
         cut += 1
-    return reply[:cut].rstrip() + "..."
+    suffix = "..."
+    if ONEBOT_AUTO_REPLY_MAX_CHARS <= len(suffix):
+        return reply[:ONEBOT_AUTO_REPLY_MAX_CHARS]
+    cut = min(cut, ONEBOT_AUTO_REPLY_MAX_CHARS - len(suffix))
+    return reply[:cut].rstrip() + suffix
 
 
 def group_prompt_text(text: str, mentioned: bool) -> str:
@@ -351,6 +368,17 @@ async def send_group_reply(websocket: Any, event: Dict[str, Any], group_id: str,
             await asyncio.sleep(0.8)
 
 
+async def send_group_poke(websocket: Any, group_id: str, user_id: str) -> None:
+    await send_action(
+        websocket,
+        "group_poke",
+        {
+            "group_id": int(group_id) if group_id.isdigit() else group_id,
+            "user_id": int(user_id) if user_id.isdigit() else user_id,
+        },
+    )
+
+
 async def send_private_reply(websocket: Any, user_id: str, reply: str) -> None:
     chunks = split_reply(reply)
     for index, chunk in enumerate(chunks):
@@ -380,12 +408,15 @@ async def handle_group_message(websocket: Any, event: Dict[str, Any]) -> None:
         log(f"已写入自动长期记忆: group_id={group_id}, user_id={user_id}")
 
     auto_short = is_auto_short_reply(raw_text, mentioned)
+    if not mentioned and ONEBOT_GROUP_REPLY_MODE == "all" and not auto_short:
+        return
+
     text = group_prompt_text(raw_text, mentioned)
     if not text:
         return
     if auto_short:
         if not can_auto_reply(group_id):
-            log(f"跳过数学自动插话：group_id={group_id}, cooldown={ONEBOT_AUTO_REPLY_COOLDOWN_SECONDS}s")
+            log(f"跳过自动短插话：group_id={group_id}, cooldown={ONEBOT_AUTO_REPLY_COOLDOWN_SECONDS}s")
             return
         text = auto_short_prompt(text)
 
@@ -409,6 +440,10 @@ async def handle_group_message(websocket: Any, event: Dict[str, Any]) -> None:
             reply = shorten_auto_reply(reply)
         log(f"DeepSeek 回复已生成: {conversation_id}")
         await send_group_reply(websocket, event, group_id, reply)
+        if auto_short and reply and random.random() < ONEBOT_AUTO_REPLY_POKE_PROBABILITY:
+            await asyncio.sleep(0.3)
+            await send_group_poke(websocket, group_id, user_id)
+            log(f"已发送拍一拍: group_id={group_id}, user_id={user_id}")
 
 
 async def handle_private_message(websocket: Any, event: Dict[str, Any]) -> None:
@@ -477,9 +512,12 @@ async def websocket_handler(websocket: Any, path: str | None = None) -> None:
 async def main() -> None:
     log(f"启动 OneBot WebSocket 服务: ws://{ONEBOT_HOST}:{ONEBOT_PORT}{ONEBOT_PATH}")
     log(f"群聊触发模式: {ONEBOT_GROUP_REPLY_MODE}")
-    if ONEBOT_GROUP_REPLY_MODE == "all" and ONEBOT_AUTO_REPLY_MATH_ONLY:
+    if ONEBOT_GROUP_REPLY_MODE == "all":
+        scope = "仅数学相关消息" if ONEBOT_AUTO_REPLY_MATH_ONLY else "所有群消息"
         log(
-            "全群监听已启用：仅数学相关消息自动短回复，"
+            f"全群监听已启用：未 @ 时对{scope}"
+            f"按 {ONEBOT_AUTO_REPLY_PROBABILITY:.0%} 概率自动短回复，"
+            f"短回复后按 {ONEBOT_AUTO_REPLY_POKE_PROBABILITY:.0%} 概率拍一拍，"
             f"冷却 {ONEBOT_AUTO_REPLY_COOLDOWN_SECONDS}s，最多 {ONEBOT_AUTO_REPLY_MAX_CHARS} 字，"
             f"开场白：{ONEBOT_AUTO_REPLY_PREFACE or '无'}"
         )

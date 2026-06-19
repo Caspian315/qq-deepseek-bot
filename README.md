@@ -85,14 +85,6 @@ robot 「你的机器人名字」 on_ready!
 TRIGGER_PREFIXES=帝皇,teio
 ```
 
-修改二创人设：
-
-```dotenv
-PERSONA_FILE=persona_teio.md
-```
-
-人设文件只影响表达风格和长期记忆。机器人仍会优先按高水平语言模型处理数学、代码、事实和学习问题。
-
 让回复更短：
 
 ```dotenv
