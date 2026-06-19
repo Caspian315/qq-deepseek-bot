@@ -23,6 +23,7 @@ NapCatWinBootMain.exe
 conout-*.js
 KillQQ.bat
 launcher*.bat
+start-napcat-*.bat
 loadNapCat.js
 qqnt.json
 quickLoginExample.bat

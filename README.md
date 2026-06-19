@@ -1,46 +1,32 @@
-# QQ 群 DeepSeek V4 Pro 东海帝皇聊天机器人
+# QQ 群 LLM 东海帝皇聊天机器人
 
-这是一个最小可运行的 QQ 群聊天机器人：
+这是一个可在 QQ 群中使用的通用聊天机器人项目。它把 QQ 消息接入、模型调用和角色风格分开，后端可以换成任意兼容 Chat Completions 格式的模型服务。
 
-- QQ 接入：官方 QQ 机器人 API + `qq-botpy`
-- 模型：DeepSeek 官方 API 的 `deepseek-v4-pro`
-- 人设：东海帝皇启发的同人风格
-- 触发：QQ群里 `@机器人 你的问题`
+- QQ 接入：官方 QQ 机器人 API，或普通 QQ 号 + NapCat / OneBot v11
+- 模型：任意 OpenAI-compatible LLM API
+- 人设：东海帝皇启发的轻量同人风格
+- 触发：支持群里 @、前缀触发、全群概率短插话
+- 扩展：支持自动记忆、长回复拆分、随机拍一拍
 
-## 1. 准备账号
+## 1. 准备
 
 你需要：
 
-- 一个 QQ 群，且你能把机器人添加进群，最好是群主或管理员。
-- QQ 开放平台机器人：<https://q.qq.com/>
-- DeepSeek API Key：<https://platform.deepseek.com/>
 - Python 3.10 或更新版本。
+- 一个可用的模型服务 API Key。
+- 一个 QQ 群。
+- 任选一种 QQ 接入方式：
+  - 官方 QQ 开放平台机器人。
+  - 普通 QQ 小号 + NapCat。
 
-## 2. 创建 QQ 机器人
+普通 QQ 号路线更像真实 QQ 用户，能进入真实群，但属于非官方个人号方案，存在风控、冻结、掉线、重新登录等风险。建议只用小号。
 
-1. 打开 QQ 开放平台，创建机器人。
-2. 在机器人后台找到并保存 `AppID` 和 `AppSecret`。
-3. 到沙箱配置里选择你的测试QQ群，把机器人添加到群里。
-4. 开启群聊消息相关能力，事件通道使用官方 WebSocket 接入。
-5. 先在沙箱群测试，确认能收到 `@机器人` 的消息后再走发布流程。
+## 2. 安装
 
-注意：官方文档已经提示旧 `Token` 鉴权废弃，新接入请使用 `AppID` + `AppSecret`。
-
-## 3. 创建 DeepSeek API Key
-
-1. 打开 DeepSeek Platform。
-2. 创建 API Key。
-3. 确认账户有余额或赠送额度。
-4. 本项目默认模型是 `deepseek-v4-pro`。
-
-群聊建议保持 `DEEPSEEK_THINKING=disabled`，速度更快，语气也更像聊天。
-
-## 4. 本地安装
-
-在 PowerShell 中执行：
+在 PowerShell 中进入项目目录：
 
 ```powershell
-Set-Location F:\qq-deepseek-bot
+Set-Location F:\qq-llm-bot
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -48,124 +34,85 @@ copy .env.example .env
 notepad .env
 ```
 
-把 `.env` 改成这样：
+最少需要填写：
+
+```dotenv
+LLM_API_KEY=你的模型服务_API_Key
+LLM_BASE_URL=https://api.example.com/v1
+LLM_MODEL=你的模型名
+BOT_NAME=东海帝皇
+```
+
+`LLM_BASE_URL` 需要指向兼容 `/chat/completions` 的接口根地址。
+
+## 3. 模型配置
+
+常用配置：
+
+```dotenv
+LLM_THINKING=disabled
+LLM_TEMPERATURE=0.85
+LLM_MAX_TOKENS=0
+LLM_TIMEOUT=0
+```
+
+说明：
+
+- `LLM_THINKING=disabled`：更适合群聊，速度通常更快。
+- `LLM_THINKING=enabled`：适合复杂推理题，但会更慢。
+- `LLM_MAX_TOKENS=0`：不主动限制模型输出长度。
+- `LLM_TIMEOUT=0`：不设置请求等待上限，长题会一直等接口返回。
+
+如果服务商支持推理强度参数，可以配置：
+
+```dotenv
+LLM_THINKING=enabled
+LLM_REASONING_EFFORT=high
+```
+
+## 4. 官方 QQ 机器人方案
+
+在 `.env` 中填写：
 
 ```dotenv
 QQ_APPID=你的QQ机器人AppID
 QQ_APPSECRET=你的QQ机器人AppSecret
-DEEPSEEK_API_KEY=你的DeepSeek_API_Key
-DEEPSEEK_MODEL=deepseek-v4-pro
 ```
 
-## 5. 启动机器人
+启动：
 
 ```powershell
 .\.venv\Scripts\python.exe bot.py
 ```
 
-看到类似下面的日志就说明上线了：
+看到类似日志即代表上线：
 
 ```text
 robot 「你的机器人名字」 on_ready!
 ```
 
-然后在QQ群里发送：
+然后在群里发送：
 
 ```text
-@你的机器人 帝皇，今天适合训练吗？
+@你的机器人 帝皇，打个招呼
 ```
 
-机器人会调用 DeepSeek V4 Pro，并用东海帝皇风格回复。
+## 5. 普通 QQ 号 + NapCat 方案
 
-## 6. 常用调整
+NapCat 负责登录普通 QQ 号、收发 QQ 消息；本项目的 `onebot_bot.py` 负责接收 OneBot v11 事件、调用 LLM 并生成回复。
 
-只允许指定前缀触发：
+`.env` 中至少需要：
 
 ```dotenv
-TRIGGER_PREFIXES=帝皇,teio
-```
-
-让回复更短：
-
-```dotenv
-MAX_REPLY_CHARS=600
-DEEPSEEK_MAX_TOKENS=400
-```
-
-取消固定回复长度上限：
-
-```dotenv
-MAX_REPLY_CHARS=0
-DEEPSEEK_MAX_TOKENS=0
-```
-
-普通 QQ 号方案下，长回复会按 `ONEBOT_MESSAGE_CHUNK_SIZE` 自动拆成多条 QQ 消息发送。
-
-开启 DeepSeek 思考模式：
-
-```dotenv
-DEEPSEEK_THINKING=enabled
-DEEPSEEK_REASONING_EFFORT=high
-```
-
-## 7. 常见问题
-
-收不到消息：
-
-- 确认机器人在沙箱群或已发布可用群里。
-- 确认你是 `@机器人` 触发。
-- 确认后台开启了群聊消息事件。
-- 确认程序没有退出，控制台没有报错。
-
-发不出消息：
-
-- QQ 群聊被动回复有时间和频次限制，测试时不要刷太快。
-- 检查 `AppID` 和 `AppSecret` 是否正确。
-- 检查机器人是否仍在 WebSocket 在线状态。
-
-DeepSeek 报错：
-
-- 检查 `DEEPSEEK_API_KEY`。
-- 检查账户额度。
-- 检查模型名是否是 `deepseek-v4-pro`。
-
-## 8. 上服务器长期运行
-
-先在本地跑通，再放到云服务器。服务器上流程一样：安装 Python、复制项目、填写 `.env`、安装依赖、运行 `python bot.py`。
-
-Windows 服务器可以用计划任务、NSSM 或 PM2 托管；Linux 服务器建议用 `systemd`。
-
-## 9. 普通 QQ 号 + NapCat 方案
-
-如果你的官方 QQ 机器人后台提示“不支持 AIGC 机器人进入社群场景”，可以改用普通 QQ 号方案：
-
-- NapCat 负责登录普通 QQ 号、接收群消息、发送群消息。
-- 本项目的 `onebot_bot.py` 负责接收 OneBot v11 事件、调用 DeepSeek、生成回复。
-
-风险提醒：这是非官方个人号路线，可能触发 QQ 风控、冻结、掉线或需要重新登录。建议使用小号，不要使用主号。
-
-安装新增依赖：
-
-```powershell
-Set-Location F:\qq-deepseek-bot
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-确认 `.env` 中至少有：
-
-```dotenv
-DEEPSEEK_API_KEY=你的DeepSeek_API_Key
-DEEPSEEK_MODEL=deepseek-v4-pro
 ONEBOT_HOST=127.0.0.1
 ONEBOT_PORT=8080
 ONEBOT_PATH=/onebot/v11/ws
 ONEBOT_GROUP_REPLY_MODE=at
 ```
 
-启动本项目的 OneBot 服务：
+启动 OneBot 服务：
 
 ```powershell
-# 如果你还开着官方 QQ 机器人版本 bot.py，先在那个窗口按 Ctrl+C 停掉
 .\.venv\Scripts\python.exe onebot_bot.py
 ```
 
@@ -176,7 +123,7 @@ ONEBOT_GROUP_REPLY_MODE=at
 URL：ws://127.0.0.1:8080/onebot/v11/ws
 ```
 
-保存后，控制台出现：
+控制台出现：
 
 ```text
 [onebot] NapCat 已连接
@@ -187,3 +134,99 @@ URL：ws://127.0.0.1:8080/onebot/v11/ws
 ```text
 @你的普通QQ机器人 帝皇，打个招呼
 ```
+
+## 6. 普通 QQ 号快速登录
+
+如果本机已经缓存过登录账号，可以用 `-q` 指定快速登录：
+
+```powershell
+.\launcher.bat -q 你的QQ号
+```
+
+本项目也可以放一个专用启动脚本，例如：
+
+```bat
+call "%~dp0launcher.bat" -q 你的QQ号
+```
+
+如果缓存失效，仍然需要重新扫码一次。
+
+## 7. 群聊触发模式
+
+```dotenv
+# at     = 群里 @ 机器人时回复，推荐
+# prefix = 不用 @，但必须以 TRIGGER_PREFIXES 中的前缀开头
+# all    = 监听所有群消息；未 @ 时可按概率短插话
+ONEBOT_GROUP_REPLY_MODE=at
+```
+
+指定前缀触发：
+
+```dotenv
+TRIGGER_PREFIXES=帝皇,teio
+```
+
+全群随机短插话：
+
+```dotenv
+ONEBOT_GROUP_REPLY_MODE=all
+ONEBOT_AUTO_REPLY_MATH_ONLY=false
+ONEBOT_AUTO_REPLY_PROBABILITY=0.15
+ONEBOT_AUTO_REPLY_MAX_CHARS=30
+```
+
+短回复后随机拍一拍：
+
+```dotenv
+ONEBOT_AUTO_REPLY_POKE_PROBABILITY=0.8
+```
+
+## 8. 自动记忆
+
+项目会把原始群聊保存到本地 `memory_data/`，并只把包含指定关键词的内容写入长期记忆文件。
+
+```dotenv
+MEMORY_AUTO_SAVE=true
+MEMORY_AUTO_LOAD=true
+MEMORY_SAVE_RAW_GROUP_MESSAGES=true
+MEMORY_LONG_TERM_FILE=auto_memory.md
+MEMORY_CAPTURE_KEYWORDS=记住,以后,下次,如果有人,有人提到,参考这个回复
+```
+
+这些运行时记忆文件默认不提交到仓库。
+
+## 9. 常见问题
+
+收不到消息：
+
+- 确认机器人账号已经进群。
+- 确认触发模式和你的发送方式一致。
+- 确认 NapCat WebSocket 已连接。
+- 确认程序窗口没有退出。
+
+模型接口报错：
+
+- 检查 `LLM_API_KEY`。
+- 检查 `LLM_BASE_URL` 是否指向兼容 `/chat/completions` 的地址。
+- 检查 `LLM_MODEL` 是否是服务商支持的模型名。
+- 检查账户额度、地区限制或服务商状态。
+
+机器人回复太长：
+
+```dotenv
+MAX_REPLY_CHARS=600
+LLM_MAX_TOKENS=400
+```
+
+机器人回复被截断：
+
+```dotenv
+MAX_REPLY_CHARS=0
+LLM_MAX_TOKENS=0
+```
+
+## 10. 长期运行
+
+先在本地跑通，再放到服务器。服务器上流程一样：安装 Python、复制项目、填写 `.env`、安装依赖、启动脚本。
+
+Windows 可以用计划任务、NSSM 或 PM2 托管；Linux 建议用 `systemd`。

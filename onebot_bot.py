@@ -13,7 +13,7 @@ import websockets
 from dotenv import load_dotenv
 
 from auto_memory import record_group_message
-from bot import TRIGGER_PREFIXES, apply_trigger_prefix, ask_deepseek
+from bot import BOT_NAME, TRIGGER_PREFIXES, apply_trigger_prefix, ask_llm
 
 
 load_dotenv()
@@ -212,9 +212,16 @@ def is_math_related(text: str) -> bool:
     return any(re.search(pattern, lowered) for pattern in math_patterns)
 
 
+def has_name_trigger(text: str) -> bool:
+    triggers = {BOT_NAME, "东海帝皇"}
+    return any(trigger and trigger in text for trigger in triggers)
+
+
 def is_auto_short_reply(text: str, mentioned: bool) -> bool:
     if mentioned or ONEBOT_GROUP_REPLY_MODE != "all":
         return False
+    if has_name_trigger(text):
+        return True
     if ONEBOT_AUTO_REPLY_MATH_ONLY and not is_math_related(text):
         return False
     return random.random() < ONEBOT_AUTO_REPLY_PROBABILITY
@@ -423,27 +430,39 @@ async def handle_group_message(websocket: Any, event: Dict[str, Any]) -> None:
     log(f"收到群聊消息: group_id={group_id}, user_id={user_id}, content={text}")
     conversation_id = f"onebot:group:{group_id}"
     async with conversation_locks[conversation_id]:
-        log(f"开始调用 DeepSeek: {conversation_id}")
+        log(f"开始调用 LLM: {conversation_id}")
         try:
-            reply = await ask_deepseek(conversation_id, sender_name, text)
+            reply = await ask_llm(conversation_id, sender_name, text)
         except httpx.TimeoutException:
-            log("DeepSeek 请求超时")
+            log("LLM 请求超时")
             reply = (
                 "题目我已经看全了，但这次推理超过了后台等待时间。\n"
                 "这类长证明题建议把题目分成几段发，或者让我先只做其中一问。"
             )
         except httpx.HTTPStatusError as exc:
-            log(f"DeepSeek HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
-            reply = "DeepSeek 接口这次报错了，稍后再试一下。"
+            log(f"LLM HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
+            reply = "模型接口这次报错了，稍后再试一下。"
         if auto_short:
             reply = apply_auto_reply_preface(reply)
             reply = shorten_auto_reply(reply)
-        log(f"DeepSeek 回复已生成: {conversation_id}")
+        log(f"LLM 回复已生成: {conversation_id}")
         await send_group_reply(websocket, event, group_id, reply)
-        if auto_short and reply and random.random() < ONEBOT_AUTO_REPLY_POKE_PROBABILITY:
-            await asyncio.sleep(0.3)
-            await send_group_poke(websocket, group_id, user_id)
-            log(f"已发送拍一拍: group_id={group_id}, user_id={user_id}")
+        if auto_short and reply:
+            poke_roll = random.random()
+            if poke_roll < ONEBOT_AUTO_REPLY_POKE_PROBABILITY:
+                await asyncio.sleep(0.3)
+                await send_group_poke(websocket, group_id, user_id)
+                log(
+                    "已发送拍一拍: "
+                    f"group_id={group_id}, user_id={user_id}, "
+                    f"roll={poke_roll:.3f}, threshold={ONEBOT_AUTO_REPLY_POKE_PROBABILITY:.3f}"
+                )
+            else:
+                log(
+                    "本次短回复未触发拍一拍: "
+                    f"group_id={group_id}, user_id={user_id}, "
+                    f"roll={poke_roll:.3f}, threshold={ONEBOT_AUTO_REPLY_POKE_PROBABILITY:.3f}"
+                )
 
 
 async def handle_private_message(websocket: Any, event: Dict[str, Any]) -> None:
@@ -459,16 +478,16 @@ async def handle_private_message(websocket: Any, event: Dict[str, Any]) -> None:
     log(f"收到私聊消息: user_id={user_id}, content={text}")
     conversation_id = f"onebot:private:{user_id}"
     async with conversation_locks[conversation_id]:
-        log(f"开始调用 DeepSeek: {conversation_id}")
+        log(f"开始调用 LLM: {conversation_id}")
         try:
-            reply = await ask_deepseek(conversation_id, "私聊用户", text)
+            reply = await ask_llm(conversation_id, "私聊用户", text)
         except httpx.TimeoutException:
-            log("DeepSeek 请求超时")
+            log("LLM 请求超时")
             reply = "这次推理超时了。长题可以分段发，或者先让我只做其中一问。"
         except httpx.HTTPStatusError as exc:
-            log(f"DeepSeek HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
-            reply = "DeepSeek 接口这次报错了，稍后再试一下。"
-        log(f"DeepSeek 回复已生成: {conversation_id}")
+            log(f"LLM HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
+            reply = "模型接口这次报错了，稍后再试一下。"
+        log(f"LLM 回复已生成: {conversation_id}")
         await send_private_reply(websocket, user_id, reply)
 
 
@@ -517,6 +536,7 @@ async def main() -> None:
         log(
             f"全群监听已启用：未 @ 时对{scope}"
             f"按 {ONEBOT_AUTO_REPLY_PROBABILITY:.0%} 概率自动短回复，"
+            "消息含“东海帝皇”时必定短回复，"
             f"短回复后按 {ONEBOT_AUTO_REPLY_POKE_PROBABILITY:.0%} 概率拍一拍，"
             f"冷却 {ONEBOT_AUTO_REPLY_COOLDOWN_SECONDS}s，最多 {ONEBOT_AUTO_REPLY_MAX_CHARS} 字，"
             f"开场白：{ONEBOT_AUTO_REPLY_PREFACE or '无'}"

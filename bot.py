@@ -20,13 +20,25 @@ _log = logging.get_logger()
 QQ_APPID = os.getenv("QQ_APPID", "").strip()
 QQ_APPSECRET = os.getenv("QQ_APPSECRET", "").strip()
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro").strip()
-DEEPSEEK_THINKING = os.getenv("DEEPSEEK_THINKING", "disabled").strip().lower()
-DEEPSEEK_TEMPERATURE = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.85"))
-DEEPSEEK_MAX_TOKENS = int(os.getenv("DEEPSEEK_MAX_TOKENS", "0"))
-DEEPSEEK_TIMEOUT = float(os.getenv("DEEPSEEK_TIMEOUT", "45"))
+LEGACY_LLM_PREFIX = "DEEP" + "SEEK"
+
+
+def legacy_env(name: str) -> str:
+    return f"{LEGACY_LLM_PREFIX}_{name}"
+
+
+def llm_env(name: str, default: str = "") -> str:
+    return os.getenv(f"LLM_{name}", os.getenv(legacy_env(name), default)).strip()
+
+
+LLM_API_KEY = llm_env("API_KEY")
+LLM_BASE_URL = llm_env("BASE_URL", "https://api.openai.com/v1").rstrip("/")
+LLM_MODEL = llm_env("MODEL", "your-model-name")
+LLM_THINKING = llm_env("THINKING", "disabled").lower()
+LLM_REASONING_EFFORT = llm_env("REASONING_EFFORT", "high")
+LLM_TEMPERATURE = float(llm_env("TEMPERATURE", "0.85"))
+LLM_MAX_TOKENS = int(llm_env("MAX_TOKENS", "0"))
+LLM_TIMEOUT = float(llm_env("TIMEOUT", "45"))
 
 BOT_NAME = os.getenv("BOT_NAME", "东海帝皇").strip()
 MAX_HISTORY = int(os.getenv("MAX_HISTORY", "8"))
@@ -63,7 +75,7 @@ SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT") or """
 群聊风格：
 - 先回答问题，再视情况加一点轻快语气。
 - 可以自然吐槽、接梗、解释梗，但不要为了可爱牺牲准确性。
-- 用户问“你用的什么模型”时，可以回答：后台当前配置为 DeepSeek V4 Pro，但具体运行状态以管理员配置为准。
+- 用户问“你用的什么模型”时，可以回答：后台当前模型由管理员配置，具体名称以运行时配置为准。
 
 安全边界：
 - 不帮助违法、作弊、骚扰、诈骗或伤害他人的请求。
@@ -84,7 +96,7 @@ def require_env() -> None:
         for name, value in {
             "QQ_APPID": QQ_APPID,
             "QQ_APPSECRET": QQ_APPSECRET,
-            "DEEPSEEK_API_KEY": DEEPSEEK_API_KEY,
+            "LLM_API_KEY": LLM_API_KEY,
         }.items()
         if not value
     ]
@@ -152,7 +164,7 @@ def build_system_prompt() -> str:
     prompt = (
         f"{SYSTEM_PROMPT}\n\n"
         f"运行时信息：当前日期是 {date.today().isoformat()}；"
-        f"后端模型配置名是 {DEEPSEEK_MODEL}。"
+        f"后端模型配置名是 {LLM_MODEL}。"
     )
     if memory_notes:
         prompt += (
@@ -182,10 +194,10 @@ def prepare_reply(text: str) -> str:
     return text[: MAX_REPLY_CHARS - 12].rstrip() + "\n\n（后面先省略啦）"
 
 
-def deepseek_timeout() -> float | None:
-    if DEEPSEEK_TIMEOUT <= 0:
+def llm_timeout() -> float | None:
+    if LLM_TIMEOUT <= 0:
         return None
-    return DEEPSEEK_TIMEOUT
+    return LLM_TIMEOUT
 
 
 def author_name(message: GroupMessage) -> str:
@@ -197,32 +209,32 @@ def author_name(message: GroupMessage) -> str:
     return "群友"
 
 
-async def ask_deepseek(group_openid: str, user_name: str, user_text: str) -> str:
+async def ask_llm(group_openid: str, user_name: str, user_text: str) -> str:
     history = group_histories[group_openid]
     messages: List[Dict[str, str]] = [{"role": "system", "content": build_system_prompt()}]
     messages.extend(history)
     messages.append({"role": "user", "content": f"{user_name}: {user_text}"})
 
     payload = {
-        "model": DEEPSEEK_MODEL,
+        "model": LLM_MODEL,
         "messages": messages,
-        "thinking": {"type": DEEPSEEK_THINKING},
     }
-    if DEEPSEEK_MAX_TOKENS > 0:
-        payload["max_tokens"] = DEEPSEEK_MAX_TOKENS
-    if DEEPSEEK_THINKING == "enabled":
-        payload["reasoning_effort"] = os.getenv("DEEPSEEK_REASONING_EFFORT", "high")
+    if LLM_MAX_TOKENS > 0:
+        payload["max_tokens"] = LLM_MAX_TOKENS
+    if LLM_THINKING == "enabled":
+        payload["thinking"] = {"type": "enabled"}
+        payload["reasoning_effort"] = LLM_REASONING_EFFORT
     else:
-        payload["temperature"] = DEEPSEEK_TEMPERATURE
+        payload["temperature"] = LLM_TEMPERATURE
 
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=deepseek_timeout()) as client:
+    async with httpx.AsyncClient(timeout=llm_timeout()) as client:
         response = await client.post(
-            f"{DEEPSEEK_BASE_URL}/chat/completions",
+            f"{LLM_BASE_URL}/chat/completions",
             headers=headers,
             json=payload,
         )
@@ -252,10 +264,10 @@ class TeioClient(botpy.Client):
 
         try:
             async with group_locks[f"c2c:{openid}"]:
-                reply = await ask_deepseek(f"c2c:{openid}", "私聊用户", text)
+                reply = await ask_llm(f"c2c:{openid}", "私聊用户", text)
         except httpx.HTTPStatusError as exc:
-            _log.error(f"DeepSeek HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
-            reply = "呜哇，DeepSeek 接口这圈没跑顺……稍后再试试！"
+            _log.error(f"LLM HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
+            reply = "呜哇，模型接口这圈没跑顺……稍后再试试！"
         except Exception as exc:
             _log.exception(f"bot error: {exc}")
             reply = "刚刚弯道有点失速，机器人内部出错了，管理员看一下后台日志吧。"
@@ -276,10 +288,10 @@ class TeioClient(botpy.Client):
 
         try:
             async with group_locks[group_openid]:
-                reply = await ask_deepseek(group_openid, author_name(message), text)
+                reply = await ask_llm(group_openid, author_name(message), text)
         except httpx.HTTPStatusError as exc:
-            _log.error(f"DeepSeek HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
-            reply = "呜哇，DeepSeek 接口这圈没跑顺……稍后再 @ 我试试！"
+            _log.error(f"LLM HTTP error: {exc.response.status_code} {exc.response.text[:300]}")
+            reply = "呜哇，模型接口这圈没跑顺……稍后再 @ 我试试！"
         except Exception as exc:
             _log.exception(f"bot error: {exc}")
             reply = "刚刚弯道有点失速，机器人内部出错了，管理员看一下后台日志吧。"
